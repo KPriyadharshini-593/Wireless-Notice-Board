@@ -1,0 +1,157 @@
+#include<lpc21xx.h>
+#include<string.h>
+#define LCD_D 0XFF<<8
+#define RS 1<<16
+#define E 1<<17
+#define sw 1<<19
+void LCD_INIT(void);
+void LCD_CMD(unsigned char);
+void LCD_DATA(unsigned char);
+void UART0_CONFIG(void);
+void UART0_TX(unsigned char);
+unsigned char UART0_RX(void);
+void delay(unsigned int);
+void LCD_STR(unsigned char*);
+void UART0_ISR(void) __irq;
+
+char msg[16];
+unsigned char idx = 0;
+unsigned char msg_ready = 0;
+unsigned int count = 0;
+
+int main()
+{
+    char msg1[15];
+    PINSEL0|=0X00000005;
+    LCD_INIT();
+    UART0_CONFIG();
+    LCD_CMD(0x80);
+    LCD_STR("V25CE3P1-WIRELES");
+    LCD_CMD(0xC0);
+    LCD_STR("NOTICE BOARD");
+    delay(5000);
+    LCD_CMD(0x01);
+    LCD_CMD(0x80);
+    LCD_STR("NOTICE BOARD");
+    VICIntSelect = 0;
+    VICVectCntl0 = 0x20 | 6;          
+    VICVectAddr0 = (unsigned long)UART0_ISR;
+    U0IER = (1<<0);                    
+    VICIntEnable = (1<<6);
+    while(1)
+    {
+         char arr[10];
+         int i = 0,j=0,k=0;
+         if(msg_ready)
+         {
+            msg_ready = 0;
+            count = 0;
+            while(msg[i]==' ')
+            i++;
+            while((msg[i]>='0') && (msg[i]<='9'))
+            {
+              arr[k++]=msg[i];
+              count=(count*10+((msg[i++]-48)));
+            }
+            count=(atoi(arr));
+            sprintf(arr,"%d",count);
+            LCD_CMD(0XC0);
+            LCD_STR(msg);
+         }
+         if((IOPIN0 & sw) == 0)
+         {
+            delay(200);
+            if(++count>50)
+            count=1;
+            LCD_CMD(0xC0);
+            for(j=0;j<16;j++)
+            LCD_DATA(' ');
+            LCD_CMD(0xC0);
+            sprintf(msg1, "%d %s", count, strchr(msg+1, ' '));
+            LCD_CMD(0xC0);
+            LCD_STR(msg1);
+            i=0;
+            while((IOPIN0 & sw) == 0);
+         }
+   }
+}
+
+void LCD_INIT(void)
+{
+IODIR0=(LCD_D|RS|E);
+LCD_CMD(0X01);
+LCD_CMD(0X02);
+LCD_CMD(0X0C);
+LCD_CMD(0X38);
+}
+void LCD_CMD(unsigned char cmd)
+{
+IOCLR0=LCD_D;
+IOSET0=cmd<<8;
+IOCLR0=RS;
+IOSET0=E;
+delay(2);
+IOCLR0=E;
+}
+void LCD_DATA(unsigned char d)
+{
+IOCLR0=LCD_D;
+IOSET0=d<<8;
+IOSET0=RS;
+IOSET0=E;
+delay(2);
+IOCLR0=E;
+}
+void delay(unsigned int ms)
+{
+T0PR=15000-1;
+T0TCR=0X00;
+T0TCR=0X01;
+while(T0TC<ms);
+T0TCR=0X03;
+T0TCR=0X00;
+T0TCR=0X01;
+}
+void UART0_CONFIG(void)
+{
+U0LCR=0X83;
+U0DLL=97;
+U0DLM=0;
+U0LCR=0X03;
+}
+void UART0_TX(unsigned char txByte)
+{
+U0THR=txByte;
+while(((U0LSR>>5)&1)==0);
+}
+unsigned char UART0_RX(void)
+{
+while((U0LSR&1)==0);
+return U0RBR;
+}
+void LCD_STR(unsigned char* s)
+{
+while(*s)
+LCD_DATA(*s++);
+}
+void UART0_ISR(void) __irq
+{
+    unsigned char ch;
+    int temp = U0IIR;
+    if((temp & 0x0E) == 0x04)        
+    {
+      ch = U0RBR;
+      if(ch == '\n' || ch == '\r')
+      {
+        msg[idx] = '\0';
+        msg_ready = 1;
+        idx = 0;
+      }
+      else
+      {
+        if(idx < 15)
+        msg[idx++] = ch;
+      }
+    }
+    VICVectAddr = 0;
+}
